@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+import copy
 import sys
 
 machines = {}
@@ -18,6 +19,10 @@ class Ip:
 
     def check(self, other):
         biggest = 32 - max(self.mask, other.mask)
+        print " - Checking IPs: %s vs %s" % (self, other)
+        print " --- Mask is %d" % (32 - biggest)
+        print " --- Masked  : %s\t=?\t%s" % (bin(self.address >> biggest), bin(other.address >> biggest))
+        print " --- Unmasked: %s\t=?\t%s" % (bin(self.address), bin(other.address))
         return (self.address >> biggest) == (other.address >> biggest)
 
     def __repr__(self):
@@ -40,7 +45,7 @@ class Machin:
             <name> ip:subnet,ip:subnet,... default_route dest_ip:route,dest_ip:route,..."""
 
         self.subnetPair = {}
-        self.routes = {}
+        self.routes = []
         self.defaultRoute = None
         self.name = ""
 
@@ -59,7 +64,7 @@ class Machin:
         if len(descr) == 4:
             for route in descr[3].split(","):
                 route = route.split(":")
-                self.routes[route[1]] = Ip(route[0]);
+                self.routes.append((route[1], Ip(route[0])))
 
     def dump(self):
         print "Dumping machin " + self.name + " :"
@@ -74,24 +79,49 @@ class Machin:
     def __repr__(self):
         return self.name
 
-def hop(machin, dest, alreadyVisited):
-    if machin.name in alreadyVisited:
-        return False
-    for subnet, ip in machin.subnetPair.items():
-        for machineSubnet in subnets[subnet]:
-            if dest.name == machineSubnet.name and ip.check(machineSubnet.subnetPair[subnet]):
+def checkSubnet(machin, dest, subnet, subnetIp):
+    print " + Checking subnet %s" % subnet
+    for subnetMachine in subnets[subnet]:
+        if dest.name == subnetMachine.name:
+            print " +-- Found target machine %s in subnet %s" % (dest.name, subnet)
+            if subnetIp.check(subnetMachine.subnetPair[subnet]):
                 return True
-    for route, routeIp in machin.routes.items():
-        if routeIp.check([y for y in dest.subnetPair.values()][0]):
-            alreadyVisited.append(machin.name)
-            return hop(machines[route], dest, alreadyVisited)
-    alreadyVisited.append(machin.name)
-    return hop(machines[machin.defaultRoute], dest, alreadyVisited)
+    return False
+
+def hop(machin, dest, ttl):
+    print "======"
+    print "Hopping at %s, ttl: %s" % (machin, ttl)
+    if ttl == 0:
+        print "Packet died"
+        return False
+    print "Seeking machine in subnets..."
+    for subnet, subnetIp in machin.subnetPair.items():
+        if checkSubnet(machin, dest, subnet, subnetIp):
+            return True
+    print "Machine not found in subnet, trying routes..."
+    for route, routeIp in machin.routes:
+        print " + Checking route %s" % route
+        destUnmaskedIp = copy.deepcopy(dest.subnetPair.values()[0])
+        destUnmaskedIp.mask = routeIp.mask
+        if routeIp.check(destUnmaskedIp):
+            for subnet, subnetIp in machin.subnetPair.items():
+                if checkSubnet(machin, machines[route], subnet, subnetIp):
+                    return hop(machines[route], dest, ttl - 1)
+    print "No route found, hopping to default route: %s" % machin.defaultRoute
+    print "Seeking default router in subnets..."
+    for subnet, subnetIp in machin.subnetPair.items():
+        if checkSubnet(machin, machines[machin.defaultRoute], subnet, subnetIp):
+            return hop(machines[machin.defaultRoute], dest, ttl - 1)
+    print "Default route unreachable"
+    return False
 
 for line in sys.stdin.readlines():
     Machin(line[:-1])
 
-print "Machines: " + str(machines.values())
-print "Subnets: " + str(subnets)
+print "Machines: %s" % machines.values()
+print "Subnets: %s" % subnets
 
-print hop(machines[sys.argv[1]], machines[sys.argv[2]], [])
+print "Trying to go from %s to %s" % (sys.argv[1], sys.argv[2])
+print "Target is:"
+machines[sys.argv[2]].dump()
+print hop(machines[sys.argv[1]], machines[sys.argv[2]], 64)
