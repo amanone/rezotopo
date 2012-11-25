@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+import copy
 import sys
 
 machines = {}
@@ -100,7 +101,7 @@ def hop(machin, dest, ttl):
     print "Machine not found in subnet, trying routes..."
     for route, routeIp in machin.routes:
         print " + Checking route %s" % route
-        destUnmaskedIp = dest.subnetPair.values()[0]
+        destUnmaskedIp = copy.deepcopy(dest.subnetPair.values()[0])
         destUnmaskedIp.mask = routeIp.mask
         if routeIp.check(destUnmaskedIp):
             for subnet, subnetIp in machin.subnetPair.items():
